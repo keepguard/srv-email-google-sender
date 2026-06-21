@@ -1,0 +1,38 @@
+
+server:
+  port: 8601
+
+gmail:
+  client_secrets_file: /app/secure/service-account.json
+  token_file: /app/secure/token.json
+  auth_mode: service-account  # Mais robusto para produção
+  # Configurações de monitoramento para produção
+  token_monitor:
+    enabled: true
+    check_interval_minutes: 60  # Menos frequente em prod
+    auto_refresh: false  # Service account não precisa
+    fallback_to_console: false
+    # Alertas para produção
+    alerts:
+      enabled: true
+      webhook_url: ""
+      email_alert: ""
+
+rabbitmq:
+  host: rabbit-1
+  port: 5672
+  user: guest
+  password: guest
+  vhost: /
+  queues:
+    email_send: srv.email.google.sender.message.send.prod
+    email_send_dlt: srv.email.google.sender.message.send.dlt.prod
+  exchanges:
+    email_exchange: srv-email-google-sender-exchange-prod
+    email_exchange_dlt: srv-email-google-sender-exchange-dlt-prod
+  routing_keys:
+    email_send: email.google.send
+    email_failed: email.failed
+  retry:
+    max_attempts: 3
+    initial_delay_seconds: 5

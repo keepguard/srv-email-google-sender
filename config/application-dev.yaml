@@ -1,0 +1,39 @@
+
+server:
+  port: 8601
+
+gmail:
+  client_secrets_file: /app/secure/credentials.json
+  token_file: /app/secure/token.json
+  auth_mode: token-only  # Com refresh automático
+  # Configurações de monitoramento para desenvolvimento
+  token_monitor:
+    enabled: true
+    check_interval_minutes: 15  # Mais frequente em dev
+    auto_refresh: true
+    fallback_to_console: true
+  # Token Manager integration
+  token_manager:
+    enabled: true
+    base_url: http://srv-token-manager:8700
+    timeout: 10
+    retry_attempts: 3
+
+rabbitmq:
+  host: rabbit-1
+  port: 5672
+  user: guest
+  password: guest
+  vhost: /
+  queues:
+    email_send: srv.email.google.sender.message.send.dev
+    email_send_dlt: srv.email.google.sender.message.send.dlt.dev
+  exchanges:
+    email_exchange: srv-email-google-sender-exchange-dev
+    email_exchange_dlt: srv-email-google-sender-exchange-dlt-dev
+  routing_keys:
+    email_send: email.google.send
+    email_failed: email.failed
+  retry:
+    max_attempts: 3
+    initial_delay_seconds: 5
