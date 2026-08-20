@@ -70,7 +70,7 @@ rabbitmq:
 
 ```json
 {
-  "x_application": "ms-communication",
+  "tenant_id": "ms-communication",
   "x_correlation_id": "uuid-correlation-id",
   "to": "usuario@exemplo.com",
   "subject": "Assunto do e-mail",
@@ -81,7 +81,7 @@ rabbitmq:
 ```
 
 ### Campos Obrigatórios
-- `x_application`: Identificador da aplicação origem
+- `tenant_id`: Identificador da aplicação origem
 - `x_correlation_id`: ID de correlação para rastreamento
 - `to`: E-mail destinatário
 - `subject`: Assunto do e-mail

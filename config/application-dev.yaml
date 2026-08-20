@@ -20,7 +20,7 @@ gmail:
     retry_attempts: 3
 
 rabbitmq:
-  host: rabbit-1
+  host: rabbitmq
   port: 5672
   user: guest
   password: guest

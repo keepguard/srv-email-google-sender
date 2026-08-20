@@ -9,7 +9,7 @@ class EmailMessage:
     
     def __init__(
         self,
-        x_application: str,
+        tenant_id: str,
         x_correlation_id: str,
         to: str,
         subject: str,
@@ -17,7 +17,7 @@ class EmailMessage:
         cc: Optional[str] = None,
         reply_to: Optional[str] = None
     ):
-        self.x_application = x_application
+        self.tenant_id = tenant_id
         self.x_correlation_id = x_correlation_id
         self.to = to
         self.subject = subject
@@ -30,8 +30,8 @@ class EmailMessage:
     
     def _validate(self) -> None:
         """Valida os campos obrigatórios e formato de e-mail"""
-        if not self.x_application or not self.x_application.strip():
-            raise MessageValidationError("x_application é obrigatório")
+        if not self.tenant_id or not self.tenant_id.strip():
+            raise MessageValidationError("tenant_id é obrigatório")
         
         if not self.x_correlation_id or not self.x_correlation_id.strip():
             raise MessageValidationError("x_correlation_id é obrigatório")

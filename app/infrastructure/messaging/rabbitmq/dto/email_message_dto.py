@@ -6,7 +6,7 @@ from app.domain.messaging.email_message import EmailMessage
 class EmailMessageDTO(BaseModel):
     """DTO para deserialização de mensagens RabbitMQ"""
     
-    x_application: str = Field(..., description="Identificador da aplicação origem")
+    tenant_id: str = Field(..., description="Identificador da aplicação origem")
     x_correlation_id: str = Field(..., description="ID de correlação para rastreamento")
     to: str = Field(..., description="E-mail destinatário")
     subject: str = Field(..., description="Assunto do e-mail")
@@ -14,11 +14,11 @@ class EmailMessageDTO(BaseModel):
     cc: Optional[str] = Field(None, description="E-mail em cópia")
     reply_to: Optional[str] = Field(None, description="E-mail para resposta")
     
-    @field_validator('x_application')
+    @field_validator('tenant_id')
     @classmethod
-    def validate_x_application(cls, v: str) -> str:
+    def validate_tenant_id(cls, v: str) -> str:
         if not v or not v.strip():
-            raise ValueError('x_application não pode ser vazio')
+            raise ValueError('tenant_id não pode ser vazio')
         return v.strip()
     
     @field_validator('x_correlation_id')
@@ -63,7 +63,7 @@ class EmailMessageDTO(BaseModel):
     def to_domain(self) -> EmailMessage:
         """Converte DTO para entity de domínio"""
         return EmailMessage(
-            x_application=self.x_application,
+            tenant_id=self.tenant_id,
             x_correlation_id=self.x_correlation_id,
             to=self.to,
             subject=self.subject,
