@@ -71,12 +71,41 @@ class EmailMessageConsumer:
             logger.error(f"=== ERRO DE VALIDAÇÃO ===")
             logger.error(f"Correlation ID: {correlation_id}")
             logger.error(f"Erro: {e}")
-            await message.nack(requeue=False)
+            await self._forward_to_dlq(message, str(e), correlation_id)
+            await message.ack()
             
         except Exception as e:
             logger.error(f"=== ERRO AO PROCESSAR MENSAGEM ===")
             logger.error(f"Correlation ID: {correlation_id}")
             logger.error(f"Erro: {e}")
             import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            await message.nack(requeue=False)
+            tb_str = traceback.format_exc()
+            logger.error(f"Traceback: {tb_str}")
+            await self._forward_to_dlq(message, str(e), correlation_id, tb_str)
+            await message.ack()
+
+    async def _forward_to_dlq(self, message, error_msg: str, correlation_id: str, stacktrace: str = ""):
+        try:
+            from aio_pika import Message as AioMessage
+            headers = dict(message.headers or {})
+            headers["x-exception-message"] = error_msg
+            headers["x-exception-stacktrace"] = stacktrace[:2000] if stacktrace else ""
+            headers["x-original-queue"] = self.rabbitmq_config.config.queues.get("email_send", "unknown")
+            headers["x-correlation-id"] = correlation_id
+            
+            dlt_exchange_name = self.rabbitmq_config.config.exchanges.get("email_exchange_dlt", "srv-email-google-sender-exchange-dlt")
+            routing_key = self.rabbitmq_config.config.routing_keys.get("email_failed", "failed")
+            
+            dlt_exchange = await self.rabbitmq_config.channel.get_exchange(dlt_exchange_name)
+            await dlt_exchange.publish(
+                AioMessage(
+                    body=message.body,
+                    headers=headers,
+                    content_type=message.content_type
+                ),
+                routing_key=routing_key
+            )
+            logger.info(f"🚨 [DLQ Forense] Mensagem {correlation_id} encaminhada para {dlt_exchange_name} com metadados forenses")
+        except Exception as dlq_err:
+            logger.error(f"Falha ao enviar mensagem para DLQ forense: {dlq_err}")
+
