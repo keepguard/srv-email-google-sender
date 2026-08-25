@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: srv-email-google-sender
+  labels:
+    app: srv-email-google-sender
+spec:
+  selector:
+    app: srv-email-google-sender
+  ports:
+  - port: {{ .Values.service.port }}
+    targetPort: {{ .Values.service.port }}
