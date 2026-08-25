@@ -36,3 +36,6 @@ secure/
 *.key
 credentials.json
 token.json
+
+# Deploy script backups
+.deploy-backup/
