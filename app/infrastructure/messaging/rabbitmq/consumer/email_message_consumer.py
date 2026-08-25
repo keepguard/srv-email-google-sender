@@ -41,6 +41,8 @@ class EmailMessageConsumer:
     
     async def _process_message(self, message):
         correlation_id = "unknown"
+        max_attempts = 3
+        backoff = 1.0
         
         try:
             correlation_id = message.headers.get("x-correlation-id", "unknown") if message.headers else "unknown"
@@ -57,41 +59,59 @@ class EmailMessageConsumer:
             email_dto = EmailMessageDTO(**data)
             email_message = email_dto.to_domain()
             
-            # Processar mensagem usando o message_processor (SendEmailUseCase)
-            if self.message_processor:
-                await self.message_processor.process_message(email_message)
-                logger.info(f"=== E-MAIL ENVIADO COM SUCESSO ===")
-            else:
-                logger.warning("Message processor não configurado - e-mail não será enviado")
-            
-            await message.ack()
-            logger.info(f"=== MENSAGEM PROCESSADA COM SUCESSO ===")
-            
-        except MessageValidationError as e:
-            logger.error(f"=== ERRO DE VALIDAÇÃO ===")
-            logger.error(f"Correlation ID: {correlation_id}")
-            logger.error(f"Erro: {e}")
-            await self._forward_to_dlq(message, str(e), correlation_id)
+            # Processar mensagem com até 3 tentativas e backoff exponencial
+            last_err = None
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    if self.message_processor:
+                        await self.message_processor.process_message(email_message)
+                        logger.info(f"=== E-MAIL ENVIADO COM SUCESSO (Tentativa {attempt}) ===")
+                    else:
+                        logger.warning("Message processor não configurado - e-mail não será enviado")
+                    
+                    await message.ack()
+                    logger.info(f"=== MENSAGEM PROCESSADA COM SUCESSO ===")
+                    return
+                except MessageValidationError as val_err:
+                    # Erro de validação não deve ter retry
+                    logger.error(f"Erro de validação irrecuperável: {val_err}")
+                    await self._forward_to_dlq(message, str(val_err), correlation_id, "", 1)
+                    await message.ack()
+                    return
+                except Exception as proc_err:
+                    last_err = proc_err
+                    logger.warning(f"⚠️ Falha na tentativa {attempt}/{max_attempts}: {proc_err}")
+                    if attempt < max_attempts:
+                        await asyncio.sleep(backoff)
+                        backoff = min(backoff * 2.0, 5.0)
+
+            # Esgotou tentativas
+            import traceback
+            tb_str = traceback.format_exc()
+            logger.error(f"❌ Esgotadas todas as tentativas para {correlation_id}. Encaminhando para DLQ.")
+            await self._forward_to_dlq(message, str(last_err), correlation_id, tb_str, max_attempts)
             await message.ack()
             
         except Exception as e:
-            logger.error(f"=== ERRO AO PROCESSAR MENSAGEM ===")
+            logger.error(f"=== ERRO GERAL AO PROCESSAR MENSAGEM ===")
             logger.error(f"Correlation ID: {correlation_id}")
             logger.error(f"Erro: {e}")
             import traceback
             tb_str = traceback.format_exc()
-            logger.error(f"Traceback: {tb_str}")
-            await self._forward_to_dlq(message, str(e), correlation_id, tb_str)
+            await self._forward_to_dlq(message, str(e), correlation_id, tb_str, 1)
             await message.ack()
 
-    async def _forward_to_dlq(self, message, error_msg: str, correlation_id: str, stacktrace: str = ""):
+    async def _forward_to_dlq(self, message, error_msg: str, correlation_id: str, stacktrace: str = "", retry_count: int = 1):
         try:
             from aio_pika import Message as AioMessage
+            import datetime
             headers = dict(message.headers or {})
-            headers["x-exception-message"] = error_msg
+            headers["x-exception-message"] = str(error_msg)
             headers["x-exception-stacktrace"] = stacktrace[:2000] if stacktrace else ""
             headers["x-original-queue"] = self.rabbitmq_config.config.queues.get("email_send", "unknown")
             headers["x-correlation-id"] = correlation_id
+            headers["x-retry-count"] = retry_count
+            headers["x-failed-timestamp"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
             
             dlt_exchange_name = self.rabbitmq_config.config.exchanges.get("email_exchange_dlt", "srv-email-google-sender-exchange-dlt")
             routing_key = self.rabbitmq_config.config.routing_keys.get("email_failed", "failed")
@@ -105,7 +125,7 @@ class EmailMessageConsumer:
                 ),
                 routing_key=routing_key
             )
-            logger.info(f"🚨 [DLQ Forense] Mensagem {correlation_id} encaminhada para {dlt_exchange_name} com metadados forenses")
+            logger.info(f"🚨 [DLQ Forense] Mensagem {correlation_id} encaminhada para {dlt_exchange_name} com metadados forenses (Retries: {retry_count})")
         except Exception as dlq_err:
             logger.error(f"Falha ao enviar mensagem para DLQ forense: {dlq_err}")
 

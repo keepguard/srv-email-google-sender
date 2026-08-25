@@ -70,10 +70,13 @@ class RabbitMQConfig:
                 }
             )
             
-            # Queue DLT
+            # Queue DLT com TTL de 7 dias (604800000ms)
             self.email_send_dlt_queue = await self.channel.declare_queue(
                 self.config.queues["email_send_dlt"],
-                durable=True
+                durable=True,
+                arguments={
+                    "x-message-ttl": 604800000,
+                }
             )
             
             # Bindings
