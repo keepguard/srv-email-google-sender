@@ -30,8 +30,10 @@ log_debug() { echo -e "${PURPLE}[DEBUG]${NC} $1"; }
 
 # Configurações
 SERVICE_NAME="srv-email-google-sender"
-CONFIG_FILE="$(pwd)/config/application.yaml"
-DOCKER_COMPOSE_FILE="../../../docker/infra/api/docker-compose.yml"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+CONFIG_FILE="${SCRIPT_DIR}/config/application.yaml"
+DOCKER_COMPOSE_FILE="${PROJECT_ROOT}/docker/docker-compose.yml"
 BACKUP_DIR=".deploy-backup"
 
 # Configurações do GitHub
@@ -282,14 +284,10 @@ update_docker_compose() {
     # Atualizar a versão da imagem
     if [[ "$OSTYPE" == "darwin"* ]]; then
         # Atualizar para usar GitHub Packages (macOS)
-        sed -i '' "s|ghcr.io/keepguard/$SERVICE_NAME:[0-9.]*|ghcr.io/keepguard/$SERVICE_NAME:$version|g" docker-compose.yml
-        # Atualizar pull_policy para always (apenas para este serviço)
-        sed -i '' "/$SERVICE_NAME:/,/restart:/ s|pull_policy: never|pull_policy: always|" docker-compose.yml
+        sed -i '' "s|ghcr.io/keepguard/$SERVICE_NAME:[^ ]*|ghcr.io/keepguard/$SERVICE_NAME:$version|g" docker-compose.yml
     else
         # Atualizar para usar GitHub Packages (Linux)
-        sed -i "s|ghcr.io/keepguard/$SERVICE_NAME:[0-9.]*|ghcr.io/keepguard/$SERVICE_NAME:$version|g" docker-compose.yml
-        # Atualizar pull_policy para always (apenas para este serviço)
-        sed -i "/$SERVICE_NAME:/,/restart:/ s|pull_policy: never|pull_policy: always|" docker-compose.yml
+        sed -i "s|ghcr.io/keepguard/$SERVICE_NAME:[^ ]*|ghcr.io/keepguard/$SERVICE_NAME:$version|g" docker-compose.yml
     fi
     
     log_success "Docker-compose atualizado para versão: $version"
@@ -305,39 +303,10 @@ deploy_service() {
     
     cd "$(dirname "$DOCKER_COMPOSE_FILE")"
     
-    # Login no GitHub Packages para fazer pull
-    log_info "Fazendo login no GitHub Packages..."
-        log_error "Falha ao fazer login no GitHub Packages"
-        return 1
-    }
-    
-    # Parar e remover o serviço completamente para garantir recriação
-    log_info "Parando e removendo serviço $SERVICE_NAME completamente..."
-    docker-compose down "$SERVICE_NAME" 2>/dev/null || true
-    docker-compose rm -f "$SERVICE_NAME" 2>/dev/null || true
-    
-    # Fazer pull da imagem
-    log_info "Fazendo pull da imagem $SERVICE_NAME:$version..."
-    docker pull "ghcr.io/keepguard/$SERVICE_NAME:$version" || {
-        log_error "Falha ao fazer pull da imagem ghcr.io/keepguard/$SERVICE_NAME:$version"
-        return 1
-    }
-    
-    # Remover imagem local antiga para forçar uso da nova
-    log_info "Removendo imagens locais antigas do $SERVICE_NAME..."
-    docker rmi "ghcr.io/keepguard/$SERVICE_NAME:$version" 2>/dev/null || true
-    docker rmi "$SERVICE_NAME:$version" 2>/dev/null || true
-    
-    # Fazer pull novamente para garantir que temos a versão correta
-    log_info "Fazendo pull novamente da imagem $SERVICE_NAME:$version..."
-    docker pull "ghcr.io/keepguard/$SERVICE_NAME:$version" || {
-        log_error "Falha ao fazer pull da imagem ghcr.io/keepguard/$SERVICE_NAME:$version"
-        return 1
-    }
-    
     # Iniciar o serviço com recriação completa
     log_info "Iniciando serviço $SERVICE_NAME com recriação completa..."
-    docker-compose up -d "$SERVICE_NAME"
+    docker compose pull "$SERVICE_NAME" 2>/dev/null || true
+    docker compose up -d --force-recreate "$SERVICE_NAME"
     
     if [ $? -eq 0 ]; then
         log_success "Deploy do serviço $SERVICE_NAME concluído"
@@ -395,6 +364,49 @@ check_service_health() {
     return 1
 }
 
+
+# Commita e faz push das alterações do repositório do serviço após o release
+commit_and_push_release() {
+    local release_version=$1
+    local repo_dir=${2:-"$SCRIPT_DIR"}
+
+    log_step "Commit e push das alterações (Release ${release_version})..."
+
+    if ! git -C "${repo_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        log_warn "Diretório não é um repositório git: ${repo_dir}. Pulando commit/push."
+        return 0
+    fi
+
+    pushd "${repo_dir}" > /dev/null
+
+    git add -A
+    if git diff --cached --quiet; then
+        log_info "Nenhuma alteração pendente para commit."
+        popd > /dev/null
+        return 0
+    fi
+
+    if ! git commit -m "$(cat <<EOF
+Release ${release_version}
+
+EOF
+)"; then
+        log_error "Falha ao criar commit do release ${release_version}"
+        popd > /dev/null
+        return 1
+    fi
+
+    if ! git push; then
+        log_error "Falha ao fazer push do release ${release_version}"
+        popd > /dev/null
+        return 1
+    fi
+
+    log_success "Commit e push concluídos (Release ${release_version})"
+    popd > /dev/null
+    return 0
+}
+
 # Função para mostrar informações finais
 show_final_info() {
     local release_version=$1
@@ -421,7 +433,7 @@ show_final_info() {
     echo -e "${CYAN}🚀 Próximos Passos:${NC}"
     echo "  - Config atualizado para: $next_version"
     echo "  - Pronto para desenvolvimento"
-    echo "  - Execute: git add . && git commit -m 'Release $release_version'"
+    echo "  - Código commitado e enviado ao remote (Release $release_version)"
 }
 
 # Função principal
@@ -550,6 +562,10 @@ main() {
     log_step "5. Limpando arquivos temporários..."
     cleanup_backup
     
+    # Commit e push das alterações no repositório do serviço
+    log_step "6. Commit e push das alterações..."
+    commit_and_push_release "$RELEASE_VERSION" "$SCRIPT_DIR"
+
     # Mostrar informações finais
     show_final_info "$RELEASE_VERSION" "${NEXT_VERSION}-SNAPSHOT" "$DEPLOY_MODE"
 }
