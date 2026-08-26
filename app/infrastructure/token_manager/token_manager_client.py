@@ -40,66 +40,67 @@ class TokenManagerClient:
     
     async def get_token(self, email: str) -> Dict[str, Any]:
         """Get valid token for email."""
-        client = await self._get_client()
-        
-        for attempt in range(self.config.retry_attempts):
-            try:
-                logger.debug(f"Getting token for {email} (attempt {attempt + 1})")
-                
-                response = await client.get(f"/api/v1/tokens/gmail/{email}")
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    logger.debug(f"Token retrieved successfully for {email}")
-                    return data.get("token", {})
-                
-                elif response.status_code == 404:
-                    logger.error(f"Token not found for {email}")
-                    raise TokenManagerError(f"Token not found for email: {email}")
-                
-                elif response.status_code == 410:
-                    logger.warning(f"Token expired for {email}, attempting refresh")
-                    # Try to refresh token
-                    await self.refresh_token(email)
-                    continue
-                
-                else:
-                    logger.error(f"Unexpected response: {response.status_code} - {response.text}")
-                    raise TokenManagerError(f"Failed to get token: {response.status_code}")
+        async with httpx.AsyncClient(base_url=self.config.base_url, timeout=self.config.timeout) as client:
+            for attempt in range(self.config.retry_attempts):
+                try:
+                    logger.debug(f"Getting token for {email} (attempt {attempt + 1})")
                     
-            except httpx.RequestError as e:
-                logger.error(f"Request error getting token for {email}: {e}")
-                if attempt == self.config.retry_attempts - 1:
-                    raise TokenManagerError(f"Failed to get token after {self.config.retry_attempts} attempts: {e}")
-                continue
-        
-        raise TokenManagerError(f"Failed to get token for {email} after all retry attempts")
+                    response = await client.get(f"/api/v1/tokens/gmail/{email}")
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        logger.debug(f"Token retrieved successfully for {email}")
+                        return data.get("token", {})
+                    
+                    elif response.status_code == 404:
+                        logger.error(f"Token not found for {email}")
+                        raise TokenManagerError(f"Token not found for email: {email}")
+                    
+                    elif response.status_code == 410:
+                        logger.warning(f"Token expired for {email}, attempting refresh")
+                        return await self.refresh_token(email)
+                    
+                    else:
+                        logger.warning(f"Unexpected status code {response.status_code} for {email}")
+                        
+                except httpx.RequestError as e:
+                    logger.warning(f"Request error getting token for {email} (attempt {attempt + 1}): {e}")
+                    if attempt == self.config.retry_attempts - 1:
+                        raise TokenManagerError(f"Failed to connect to TokenManager: {e}") from e
+                        
+                except TokenManagerError:
+                    raise
+                except Exception as e:
+                    logger.error(f"Unexpected error getting token for {email}: {e}")
+                    if attempt == self.config.retry_attempts - 1:
+                        raise TokenManagerError(f"Unexpected error: {e}") from e
+            
+            raise TokenManagerError(f"Failed to get token for {email} after {self.config.retry_attempts} attempts")
     
     async def refresh_token(self, email: str) -> Dict[str, Any]:
         """Refresh token for email."""
-        client = await self._get_client()
-        
-        try:
-            logger.debug(f"Refreshing token for {email}")
-            
-            response = await client.post(f"/api/v1/tokens/gmail/{email}/refresh")
-            
-            if response.status_code == 200:
-                data = response.json()
-                logger.info(f"Token refreshed successfully for {email}")
-                return data.get("token", {})
-            
-            elif response.status_code == 404:
-                logger.error(f"Token not found for refresh: {email}")
-                raise TokenManagerError(f"Token not found for refresh: {email}")
-            
-            else:
-                logger.error(f"Failed to refresh token: {response.status_code} - {response.text}")
-                raise TokenManagerError(f"Failed to refresh token: {response.status_code}")
+        async with httpx.AsyncClient(base_url=self.config.base_url, timeout=self.config.timeout) as client:
+            try:
+                logger.debug(f"Refreshing token for {email}")
                 
-        except httpx.RequestError as e:
-            logger.error(f"Request error refreshing token for {email}: {e}")
-            raise TokenManagerError(f"Failed to refresh token: {e}")
+                response = await client.post(f"/api/v1/tokens/gmail/{email}/refresh")
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    logger.debug(f"Token refreshed successfully for {email}")
+                    return data.get("token", {})
+                
+                elif response.status_code == 404:
+                    logger.error(f"Token not found for refresh: {email}")
+                    raise TokenManagerError(f"Token not found for refresh: {email}")
+                
+                else:
+                    logger.error(f"Failed to refresh token: {response.status_code} - {response.text}")
+                    raise TokenManagerError(f"Failed to refresh token: {response.status_code}")
+                    
+            except httpx.RequestError as e:
+                logger.error(f"Request error refreshing token for {email}: {e}")
+                raise TokenManagerError(f"Failed to refresh token: {e}") from e
     
     async def get_token_status(self, email: str) -> Dict[str, Any]:
         """Get token status for email."""
